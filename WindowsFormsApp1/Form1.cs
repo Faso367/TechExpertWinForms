@@ -1,513 +1,177 @@
-﻿//using Microsoft.Web.WebView2.WinForms;
+﻿using Kodeks;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
+using System.ServiceModel;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using WindowsFormsApp1.TechExpertRef;
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WinForms;
-using TheArtOfDev.HtmlRenderer.WinForms;
-using System.Collections;
-using System.Security.Policy;
-using HtmlAgilityPack;
-using System.Xml;
 
 namespace WindowsFormsApp1
 {
-
     public partial class Form1 : Form
     {
-        private HtmlPanel htmlPanel;
-        private HtmlAgilityPack.HtmlDocument htmlDoc;
-        private HtmlNode containerNode;
-        private HtmlNode buttonWrapperNode;
-        private HtmlNode tableNode;
-        private HtmlNode headerWrapperNode;
-        private string userInput;
-        private string bparser;
+        private readonly TheArtOfDev.HtmlRenderer.WinForms.HtmlPanel _htmlPanel;
+        private readonly TechexpertClient _client;
+        private readonly List<DocListItem> _dataSource = new List<DocListItem>();
 
-        private Tuple<int, string> firstSearchRes = new Tuple<int, string>(0, "");
+        private DocListInfo _docListInfo = null;
 
         public Form1()
         {
             InitializeComponent();
 
-            searchBut.Click += SubmitButton_Click;
+            var binding = new BasicHttpBinding();
+            var endpoint = new EndpointAddress("http://192.168.0.14:81/docs/api");
+            _client = new TechexpertClient(binding, endpoint);
 
-            // Инициализация HtmlPanel для отображения HTML
-            htmlPanel = new HtmlPanel
-            {
-                Dock = DockStyle.Fill
-            };
+            _htmlPanel = new TheArtOfDev.HtmlRenderer.WinForms.HtmlPanel();
+            _htmlPanel.Dock = DockStyle.Fill;
+            _htmlPanel.LinkClicked += htmlPanel_LinkClicked;
+            Controls.Add(_htmlPanel);
 
-            Controls.Add(htmlPanel);
-
-            htmlPanel.LinkClicked += (sender, e) =>
-            {
-                if (e.Link == "button")
-                {
-                    var thNode = buttonWrapperNode.SelectSingleNode("//div[@class=\"loadMoreButton\"]");
-                    if (thNode != null)
-                        buttonWrapperNode.RemoveChild(tableNode.SelectSingleNode("//div[@class=\"loadMoreButton\"]"));
-
-                    var res = WriteToForm(userInput, bparser, firstSearchRes.Item1, firstSearchRes.Item2);
-
-                }
-            };
+            btnSearch.Click += SearchButton_Click;
+            txtSearch.KeyDown += TextBoxSearch_KeyDown;
         }
 
-        private void Form1_Load(object sender, EventArgs e)
+        private async void htmlPanel_LinkClicked(object sender, TheArtOfDev.HtmlRenderer.Core.Entities.HtmlLinkClickedEventArgs e)
         {
-            htmlDoc = new HtmlAgilityPack.HtmlDocument();
-
-
-            // Создание тега <html>
-            var htmlNode = HtmlNode.CreateNode("<html></html>");
-            htmlDoc.DocumentNode.AppendChild(htmlNode);
-
-            // Создание тега <head> и добавление CSS-ссылки
-            var headNode = HtmlNode.CreateNode("<head></head>");
-            var styleNode = HtmlNode.CreateNode("<link rel=\"stylesheet\" type=\"text/css\" href=\"C:\\Users\\LIKORIS001\\Desktop\\Winforms TechExpert\\WindowsFormsApp1\\WindowsFormsApp1\\src\\styles.css\"/>");
-            headNode.AppendChild(styleNode);
-            htmlNode.AppendChild(headNode);
-
-            // Создание тега <body>
-            var bodyNode = HtmlNode.CreateNode("<body></body>");
-            htmlNode.AppendChild(bodyNode);
-            containerNode = HtmlNode.CreateNode("<div class=\"container\"></div>");
-            bodyNode.AppendChild(containerNode);
-
-            // Создание таблицы
-            tableNode = HtmlNode.CreateNode("<div class=\"table\"></div>");
-            containerNode.AppendChild(tableNode);
-
-            buttonWrapperNode = HtmlNode.CreateNode($"<div class=\"buttonWrapper\"><a class=\"loadMoreButton\" href=\"button\">Загрузить ещё</a></div>");
-            containerNode.AppendChild(buttonWrapperNode);
-        }
-
-
-
-        // Обработчик клика по кнопке Поиск
-        private async void SubmitButton_Click(object sender, EventArgs e)
-        {
-            // Получаем текст из TextBox
-            userInput = searchTextBox.Text;
-
-            // Добавляем текст в таблицу, если он не пустой
-            if (!string.IsNullOrWhiteSpace(userInput))
-            {
-
-                if (tableNode != null)
-                {
-                    // Очищаем содержимое тега, удаляя все дочерние элементы
-                    tableNode.RemoveAllChildren();
-                }
-
-                var titleWrapperNode = HtmlNode.CreateNode("<div class=\"titleWrapper\"><p>Найденные документы</p></div>");
-                tableNode.AppendChild(titleWrapperNode);
-
-
-                headerWrapperNode = HtmlNode.CreateNode("<div class=\"countFindRowsWrapper\"></div>");
-                tableNode.AppendChild(headerWrapperNode);
-
-                bparser = await Getbparser(userInput);
-
-                firstSearchRes = WriteToForm(userInput, bparser);
-
-                // Обновляем текст формы
-                htmlPanel.Text = htmlDoc.DocumentNode.OuterHtml;
-            }
-            else
-            {
-                MessageBox.Show("Пожалуйста, введите текст.");
-            }
-        }
-
-        private async Task<string> Getbparser(string userInput)
-        {
-            string url2 = "http://192.168.0.14:81/kodeks/bparser?parse=" + Uri.EscapeDataString(userInput);
-
             try
             {
-                using (HttpClient httpclient = new HttpClient())
+                if (e.Link == "more")
                 {
-                    HttpResponseMessage response = await httpclient.GetAsync(url2);
-                    response.EnsureSuccessStatusCode();
-                    return await response.Content.ReadAsStringAsync();
+                    e.Handled = true;
+                    if (e.Attributes.ContainsKey("part") && int.TryParse(e.Attributes["part"], out int part))
+                    {
+                        var (items, nextPart) = await LoadDataAsync(part);
+                        _dataSource.AddRange(items);
+
+                        BuildHtml(nextPart);
+                    }
+                }
+                else if (e.Link == "default")
+                {
+                    e.Handled = true;
+                }
+                else if (e.Link == "kodeks")
+                {
+                    e.Handled = true;
+
+                    var nd = e.Attributes.ContainsKey("nd") ? e.Attributes["nd"] : null;
+                    var mark = e.Attributes.ContainsKey("mark") ? e.Attributes["mark"] : null;
+                    await _client.RunKodeks(nd, mark);
                 }
             }
-            catch(HttpRequestException e)
+            catch (Exception ex)
             {
-                MessageBox.Show(e.Message);
-                throw new HttpRequestException("Произошла ошибка при запросе к серверу, проверьте соединение с сервером");
+                MessageBox.Show(ex.InnerException?.Message ?? ex.Message);
             }
         }
 
-
-        private Tuple<int, string> WriteToForm(string userInput, string bparserResult, int mainParts = 0, string firstFuzzySearchId = "")
+        private async void SearchButton_Click(object sender, EventArgs e)
         {
-            bool firstCall = false;
-            var client2 = new apiSoapClient();
-
-            List<GetSearchListNResponse> responses = new List<GetSearchListNResponse>();
-            int returnableRowsCount = 0;
-
-            // Если вызываем метод впервые
-            if (firstFuzzySearchId == "")
+            try
             {
-                firstCall = true;
-                var mainInfo = client2.FuzzySearch(userInput, null, 0, "searchbynames", bparserResult);
-                responses.Add(client2.GetSearchListN(new GetSearchListNRequest(mainInfo.id, null, 0, null, null, false)));
+                _docListInfo = null;
+                _dataSource.Clear();
 
-                mainParts = mainInfo.parts;
-                firstFuzzySearchId = mainInfo.id;
-                headerWrapperNode.InnerHtml = $"<p>В списке элементов: {responses[0].ArrayOfDocListItem.Length}</p>";
+                var (items, nextPart) = await LoadDataAsync();
+                _dataSource.AddRange(items);
+
+                BuildHtml(nextPart);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.InnerException?.Message ?? ex.Message);
+            }
+        }
+
+        private void TextBoxSearch_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                SearchButton_Click(btnSearch, EventArgs.Empty);
+            }
+        }
+
+        private void BuildHtml(int? nextPart)
+        {
+            List<string> builder = new List<string>();
+
+            foreach (var item in _dataSource)
+            {
+                builder.Add($"<p>{FormatedTitle(item.Name, item.Nd)}<p/>{FormatedText(item.Info)}<a href=\"default\" class=\"button\" nd=\"{item.Nd}\">По умолчанию</a>");
             }
 
-            // если пользователь нажал Загрузить ещё
-            else
+            var scrollPosition = _htmlPanel.VerticalScroll.Value;
+
+            _htmlPanel.Text = @$"
+                <html>
+                  <style>
+                    body {{
+                      margin: 10px;
+                    }}
+                    p {{
+                      margin-top: 0px;
+                      margin-bottom: 0px;
+                    }}
+                    span {{
+                      display: block;
+                      margin-left: 20px;
+                    }}
+                    a {{
+                      text-decoration: none;
+                    }}
+                    .button {{
+                      margin-top: 20px;
+                      margin-left: 20px;
+                      text-decoration: none;
+                      background-color: #ffffff;
+                      color: #333333;
+                      padding: 5px 10px 5px 10px;
+                      border: 1px solid gray;
+                    }}
+                  </style>
+                  <body>
+                    {string.Join("<hr/>", builder)}
+                    {(nextPart != null ? $"<hr/><a href=\"more\" part=\"{nextPart}\">Показать еще</a>" : "")}
+                  </body>
+                </html>";
+
+            if (_htmlPanel.VerticalScroll.Maximum > scrollPosition)
             {
-
-                if (mainParts > 1)
-                {
-                    returnableRowsCount = 20;
-
-                    // Добавляем остальные основные части (если они есть)
-                    for (int mainPartNumber = 1; mainPartNumber < mainParts; mainPartNumber++)
-                        responses.Add(client2.GetSearchListN(new GetSearchListNRequest(firstFuzzySearchId, null, mainPartNumber, null, null, false)));
-                }
-
-                var dopInfo = client2.FuzzySearch(userInput, null, 1, "searchbynames", bparserResult);
-                // Добавляем дополнительные части (комментарии, образцы и тд)
-                for (int dopPartNumber = 0; dopPartNumber < dopInfo.parts; dopPartNumber++)
-                    responses.Add(client2.GetSearchListN(new GetSearchListNRequest(dopInfo.id, null, dopPartNumber, null, null, false)));
-
+                _htmlPanel.VerticalScroll.Value = scrollPosition;
+                _htmlPanel.PerformLayout();
             }
+        }
 
+        private async Task<(DocListItem[], int?)> LoadDataAsync(int part = 0)
+        {
+            var docListInfo = await GetDocListInfoAsync(txtSearch.Text);
+            var items = await _client.GetSearchListNAsync(docListInfo.Id, null, part, null, null, false);
+            var nextPart = docListInfo.Parts > part + 1 ? (int?)(part + 1) : null;
+            return (items.ArrayOfDocListItem, nextPart);
+        }
 
-            foreach (var resp in responses)
+        private string FormatedTitle(string text, int nd)
+        {
+            return Regex.Replace(text, @"^(.*?\(часть.*?\)|^[^(]*)(.*)", $"<a href=\"kodeks\" nd=\"{nd}\"><b>${{1}}</b></a>${{2}}");
+        }
+
+        private string FormatedText(string text)
+        {
+            string formatedText = Regex.Replace(text, @"^(.*)(<br>(.*)|$)", "<i style=\"color: gray\">${1}</i><br/>${2}");
+            formatedText = Regex.Replace(formatedText, @"<a\shref=""([^""]*)""\snd=""(\d+)""\smark=""(\w+)"">", @"<a href=""kodeks"" nd=""${2}"" mark=""${3}"">");
+            return formatedText;
+        }
+
+        private async Task<DocListInfo> GetDocListInfoAsync(string searchText)
+        {
+            if (_docListInfo == null)
             {
-                returnableRowsCount += resp.ArrayOfDocListItem.Length;
-                Console.WriteLine(1);
-                for (int i = 0; i < resp.ArrayOfDocListItem.Length; i++)
-                {
-                    DocListItem docInfo = resp.ArrayOfDocListItem[i];
-                    var htmlRow = new HtmlAgilityPack.HtmlDocument();
-                    htmlRow.LoadHtml(docInfo.info);
-
-                    // Находим все теги <a>
-                    var anchorNodes = htmlRow.DocumentNode.SelectNodes("//a");
-
-                    // Проверяем наличие тегов <a>
-                    if (anchorNodes != null)
-                    {
-                        foreach (var anchorNode in anchorNodes)
-                        {
-                            // Получаем значение атрибута "mark"
-                            string markValue = anchorNode.GetAttributeValue("mark", string.Empty);
-                            anchorNode.SetAttributeValue("href", $"kodeks://link/d?nd={docInfo.nd}&mark={markValue}");
-                        }
-                    }
-                    else
-                    {
-                        var linkNode = HtmlNode.CreateNode($"<a href='kodeks://link/d?nd={docInfo.nd}'>{htmlRow.Text}</a>");
-                        htmlRow.DocumentNode.InnerHtml = linkNode.OuterHtml;
-                    }
-
-
-                    //Находим первый тег<br>
-
-                    var brNode = htmlRow.DocumentNode.SelectSingleNode("//br");
-
-                    if (brNode != null)
-                    {
-                        // Получаем родительский узел тега <br>
-                        var parentNode = brNode.ParentNode;
-
-                        // Извлекаем текст до <br>
-                        string textBeforeBr = parentNode.InnerHtml.Split(new string[] { "<br>" }, StringSplitOptions.None)[0];
-
-                        parentNode.RemoveChild(brNode);
-
-                        // Создаем ссылку
-                        var linkNode = HtmlNode.CreateNode($"<a href=\"kodeks://link/d?nd={docInfo.nd}\">{textBeforeBr}</a>");
-
-                        // Заменяем текст на ссылку до тега <br>, прежде чем изменять другие узлы
-                        parentNode.InnerHtml = parentNode.InnerHtml.Replace(textBeforeBr, linkNode.OuterHtml);
-                    }
-                    // Получаем обновленный HTML
-                    var tbRow = HtmlNode.CreateNode($"<div class=\"tbRow\">{htmlRow.DocumentNode.OuterHtml}</div>");
-                    tableNode.AppendChild(tbRow);
-                }
-
+                var bparser = await _client.GetbparserAsync(searchText);
+                _docListInfo = await _client.FuzzySearchAsync(searchText, null, null, "searchbynames", bparser);
             }
-            if (firstCall == false)
-            {
-                var thNode = tableNode.SelectSingleNode("//div[@class=\"countFindRowsWrapper\"]");
-
-                // Изменяем внутренний текст элемента <th>
-                thNode.InnerHtml = $"<p>В списке элементов: {returnableRowsCount}</p>";
-            }
-            htmlPanel.Text = htmlDoc.DocumentNode.OuterHtml;
-            return new Tuple<int, string>(mainParts, firstFuzzySearchId);
+            return _docListInfo;
         }
     }
 }
-    //public async Task<IEnumerable<string>> TestAsync(string userInput)
-    //{
-    //    string url2 = "http://192.168.0.14:81/kodeks/bparser?parse=" + Uri.EscapeDataString(userInput);
-    //    using (HttpClient httpclient = new HttpClient())
-    //    {
-    //        HttpResponseMessage response = await httpclient.GetAsync(url2);
-    //        response.EnsureSuccessStatusCode();
-    //        string bparserResult = await response.Content.ReadAsStringAsync();
-
-    //        Console.WriteLine();
-
-
-    //        return GetChars(bparserResult, userInput);
-    //    }
-    //}
-
-    //private static IEnumerable<string> GetChars(string bparserResult, string userInput)
-    //{
-    //    var client2 = new apiSoapClient();
-
-    //    var resz = client2.FuzzySearch(userInput, null, 0, "searchbynames", bparserResult);
-
-
-    //    var req2 = new TechExpertRef.GetSearchListNRequest(resz.id, null, 0, null, null, false);
-    //    var resp2 = client2.GetSearchListN(req2);
-
-    //    for (int i = 0; i < resp2.ArrayOfDocListItem.Length; i++)
-    //    {
-    //        DocListItem docInfo = resp2.ArrayOfDocListItem[i];
-    //        yield return docInfo.nd.ToString();
-    //    }
-    //}
-
-    //private async Task<int> WriteToForm(string userInput, ref List<GetSearchListNResponse> responses, string firstFuzzySearchId = "")
-    //{
-    //    int countMainParts = -1;
-    //    //string text = "гражданский кодекс";
-    //    string url2 = "http://192.168.0.14:81/kodeks/bparser?parse=" + Uri.EscapeDataString(userInput);
-
-    //    using (HttpClient httpclient = new HttpClient())
-    //    {
-    //        HttpResponseMessage response = await httpclient.GetAsync(url2);
-    //        response.EnsureSuccessStatusCode();
-    //        string bparserResult = await response.Content.ReadAsStringAsync();
-
-    //        var client2 = new apiSoapClient();
-
-    //        List<GetSearchListNResponse> responses = new List<GetSearchListNResponse>();
-
-    //        if (writeMore)
-    //        {
-    //            for(int mainPartNumber = 1; mainPartNumber < mainParts; mainPartNumber++)
-    //            {
-    //                responses.Add(client2.GetSearchListN(new GetSearchListNRequest(mai.id, null, dopPartNumber, null, null, false)));
-    //            }
-
-    //            var dopInfo = client2.FuzzySearch(userInput, null, 1, "searchbynames", bparserResult);
-
-    //            for (int dopPartNumber = 0; dopPartNumber < dopInfo.parts; dopPartNumber++)
-    //            {
-    //                responses.Add(client2.GetSearchListN(new GetSearchListNRequest(dopInfo.id, null, dopPartNumber, null, null, false)));
-    //            }
-
-    //        }
-    //        var mainInfo = client2.FuzzySearch(userInput, null, 0, "searchbynames", bparserResult);
-    //        countMainParts = resz.parts;
-
-    //        //var resz2 = client2.FuzzySearch(userInput, null, 1, "searchbynames", bparserResult);
-
-
-    //        var req2 = new TechExpertRef.GetSearchListNRequest(resz.id, null, 0, null, null, false);
-    //        var resp2 = client2.GetSearchListN(req2);
-
-    //        var req3 = new TechExpertRef.GetSearchListNRequest(resz.id, null, 1, null, null, false);
-    //        var resp3 = client2.GetSearchListN(req3);
-
-    //        var req4 = new TechExpertRef.GetSearchListNRequest(resz2.id, null, 0, null, null, false);
-    //        var resp4 = client2.GetSearchListN(req4);
-
-
-    //        var countFindRowsNode = HtmlNode.CreateNode($"<tr><th class=\"countFindRows\">В списке элементов: {resp2.ArrayOfDocListItem.Length}</th></tr>");
-    //        tableNode.AppendChild(countFindRowsNode);
-    //        /*Федеральный закон от 29.07.2017 N 217-ФЗ
-    //         * <br>
-    //         * <span class="refchapname">
-    //         * <a href="javascript:;" nd="436753181" mark="0000000000000000000000000000000000000000000000000246QHAJ">Статья 33.</a>
-    //         * О внесении изменений в часть первую Гражданского кодекса Российской Федерации</span>*/
-
-    //        for (int i = 0; i < resp2.ArrayOfDocListItem.Length; i++)
-    //        {
-    //            DocListItem docInfo = resp2.ArrayOfDocListItem[i];
-
-    //            var htmlRow = new HtmlAgilityPack.HtmlDocument();
-    //            //var newHtmlRow = new HtmlAgilityPack.HtmlDocument();
-    //            htmlRow.LoadHtml(docInfo.info);
-
-    //            // Находим все теги <a>
-    //            var anchorNodes = htmlRow.DocumentNode.SelectNodes("//a");
-
-    //            // Проверяем наличие тегов <a>
-    //            if (anchorNodes != null)
-    //            {
-    //                foreach (var anchorNode in anchorNodes)
-    //                {
-    //                    // Получаем значение атрибута "mark"
-    //                    string markValue = anchorNode.GetAttributeValue("mark", string.Empty);
-    //                    anchorNode.SetAttributeValue("href", $"kodeks://link/d?nd={docInfo.nd}&mark={markValue}");
-    //                }
-    //            }
-    //            else
-    //            {
-    //                var linkNode = HtmlNode.CreateNode($"<a href='kodeks://link/d?nd={docInfo.nd}'>{htmlRow.Text}</a>");
-    //                htmlRow.DocumentNode.InnerHtml = linkNode.OuterHtml;
-    //            }
-
-
-    //            //Находим первый тег<br>
-
-    //            var brNode = htmlRow.DocumentNode.SelectSingleNode("//br");
-
-    //            if (brNode != null)
-    //            {
-    //                // Получаем родительский узел тега <br>
-    //                var parentNode = brNode.ParentNode;
-
-    //                // Извлекаем текст до <br>
-    //                string textBeforeBr = parentNode.InnerHtml.Split(new string[] { "<br>" }, StringSplitOptions.None)[0];
-
-    //                parentNode.RemoveChild(brNode);
-
-    //                // Создаем ссылку
-    //                var linkNode = HtmlNode.CreateNode($"<a href='kodeks://link/d?nd={docInfo.nd}'>{textBeforeBr}</a>");
-
-    //                // Заменяем текст на ссылку до тега <br>, прежде чем изменять другие узлы
-    //                parentNode.InnerHtml = parentNode.InnerHtml.Replace(textBeforeBr, linkNode.OuterHtml);
-
-
-    //                //newHtmlRow.DocumentNode.AppendChild(linkNode);
-    //            }
-
-    //            // Получаем обновленный HTML
-    //            var tbRow = HtmlNode.CreateNode($"<tr><td class=\"tbRow\">{htmlRow.DocumentNode.OuterHtml}</td></tr>");
-    //            tableNode.AppendChild(tbRow);
-    //        }
-    //        htmlDoc.DocumentNode.AppendChild(HtmlNode.CreateNode($"<a class='loadMoreButton' href='button'>Загрузить ещё</a>"));
-    //    }
-    //    return countMainParts;
-    //    //return true;
-    //}
-
-
-
-
-    //private async Task<bool> WriteToForm(string userInput)
-    //{
-    //    //string text = "гражданский кодекс";
-    //    string url2 = "http://192.168.0.14:81/kodeks/bparser?parse=" + Uri.EscapeDataString(userInput);
-
-    //    using (HttpClient httpclient = new HttpClient())
-    //    {
-    //        HttpResponseMessage response = await httpclient.GetAsync(url2);
-    //        response.EnsureSuccessStatusCode();
-    //        string bparserResult = await response.Content.ReadAsStringAsync();
-
-    //        var client2 = new apiSoapClient();
-
-    //        var resz = client2.FuzzySearch(userInput, null, 0, "searchbynames", bparserResult);
-    //        var resz2 = client2.FuzzySearch(userInput, null, 1, "searchbynames", bparserResult);
-
-
-    //        var req2 = new TechExpertRef.GetSearchListNRequest(resz.id, null, 0, null, null, false);
-    //        var resp2 = client2.GetSearchListN(req2);
-
-    //        var req3 = new TechExpertRef.GetSearchListNRequest(resz.id, null, 1, null, null, false);
-    //        var resp3 = client2.GetSearchListN(req3);
-
-    //        var req4 = new TechExpertRef.GetSearchListNRequest(resz2.id, null, 0, null, null, false);
-    //        var resp4 = client2.GetSearchListN(req4);
-
-
-    //        var countFindRowsNode = HtmlNode.CreateNode($"<tr><th class=\"countFindRows\">В списке элементов: {resp2.ArrayOfDocListItem.Length}</th></tr>");
-    //        tableNode.AppendChild(countFindRowsNode);
-    //        /*Федеральный закон от 29.07.2017 N 217-ФЗ
-    //         * <br>
-    //         * <span class="refchapname">
-    //         * <a href="javascript:;" nd="436753181" mark="0000000000000000000000000000000000000000000000000246QHAJ">Статья 33.</a>
-    //         * О внесении изменений в часть первую Гражданского кодекса Российской Федерации</span>*/
-
-    //        for (int i = 0; i < resp2.ArrayOfDocListItem.Length; i++)
-    //        {
-    //            DocListItem docInfo = resp2.ArrayOfDocListItem[i];
-
-    //            var htmlRow = new HtmlAgilityPack.HtmlDocument();
-    //            //var newHtmlRow = new HtmlAgilityPack.HtmlDocument();
-    //            htmlRow.LoadHtml(docInfo.info);
-
-    //            // Находим все теги <a>
-    //            var anchorNodes = htmlRow.DocumentNode.SelectNodes("//a");
-
-    //            // Проверяем наличие тегов <a>
-    //            if (anchorNodes != null)
-    //            {
-    //                foreach (var anchorNode in anchorNodes)
-    //                {
-    //                    // Получаем значение атрибута "mark"
-    //                    string markValue = anchorNode.GetAttributeValue("mark", string.Empty);
-    //                    anchorNode.SetAttributeValue("href", $"kodeks://link/d?nd={docInfo.nd}&mark={markValue}");
-    //                }
-    //            }
-    //            else
-    //            {
-    //                var linkNode = HtmlNode.CreateNode($"<a href='kodeks://link/d?nd={docInfo.nd}'>{htmlRow.Text}</a>");
-    //                htmlRow.DocumentNode.InnerHtml = linkNode.OuterHtml;
-    //            }
-
-
-    //            //Находим первый тег<br>
-
-    //            var brNode = htmlRow.DocumentNode.SelectSingleNode("//br");
-
-    //            if (brNode != null)
-    //            {
-    //                // Получаем родительский узел тега <br>
-    //                var parentNode = brNode.ParentNode;
-
-    //                // Извлекаем текст до <br>
-    //                string textBeforeBr = parentNode.InnerHtml.Split(new string[] { "<br>" }, StringSplitOptions.None)[0];
-
-    //                parentNode.RemoveChild(brNode);
-
-    //                // Создаем ссылку
-    //                var linkNode = HtmlNode.CreateNode($"<a href='kodeks://link/d?nd={docInfo.nd}'>{textBeforeBr}</a>");
-
-    //                // Заменяем текст на ссылку до тега <br>, прежде чем изменять другие узлы
-    //                parentNode.InnerHtml = parentNode.InnerHtml.Replace(textBeforeBr, linkNode.OuterHtml);
-
-
-    //                //newHtmlRow.DocumentNode.AppendChild(linkNode);
-    //            }
-
-    //            // Получаем обновленный HTML
-    //            var tbRow = HtmlNode.CreateNode($"<tr><td class=\"tbRow\">{htmlRow.DocumentNode.OuterHtml}</td></tr>");
-    //            tableNode.AppendChild(tbRow);
-    //        }
-    //        htmlDoc.DocumentNode.AppendChild(HtmlNode.CreateNode($"<a class='loadMoreButton' href='button'>Загрузить ещё</a>"));
-    //    }
-    //    return true;
-    //}
-
-
-
