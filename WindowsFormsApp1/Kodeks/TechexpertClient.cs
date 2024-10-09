@@ -8,6 +8,8 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
+using System.ServiceModel;
+
 namespace Kodeks
 {
     [System.CodeDom.Compiler.GeneratedCodeAttribute("System.ServiceModel", "4.0.0.0")]
@@ -4044,6 +4046,8 @@ namespace Kodeks
     {
     }
 
+
+
     [System.Diagnostics.DebuggerStepThroughAttribute()]
     [System.CodeDom.Compiler.GeneratedCodeAttribute("System.ServiceModel", "4.0.0.0")]
     public partial class TechexpertClient : System.ServiceModel.ClientBase<Kodeks.apiSoap>, Kodeks.apiSoap
@@ -4072,6 +4076,7 @@ namespace Kodeks
                 base(binding, remoteAddress)
         {
         }
+
 
         [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Advanced)]
         Kodeks.AlterSearchResponse Kodeks.apiSoap.AlterSearch(Kodeks.AlterSearchRequest request)

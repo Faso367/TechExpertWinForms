@@ -1,13 +1,50 @@
 ﻿using Kodeks;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Data.SqlTypes;
+using System.Diagnostics;
+using System.IO;
 using System.ServiceModel;
+using System.ServiceModel.Channels;
+using System.ServiceModel.Configuration;
+using System.ServiceModel.Dispatcher;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+//using WindowsFormsApp1.Kodeks;
+
 
 namespace WindowsFormsApp1
 {
+    
+    public class StringTraceListener : TraceListener
+    {
+        /// <summary>
+        /// Перехватывает XML ответ и выводит сообщение на экран
+        /// </summary>
+        /// <param name="data">XML ответ</param>
+        public override void TraceData(TraceEventCache eventCache, string source, TraceEventType eventType, int id, object data)
+        {
+            string ErrorXMLResponse = data.ToString();
+            string pattern = @"&lt;faultstring&gt;(.*?)&lt;/faultstring&gt;";
+
+            Match match = Regex.Match(ErrorXMLResponse, pattern);
+
+            if (match.Success)
+            {
+                // Извлечение захваченной группы
+                string faultMessage = match.Groups[1].Value;
+                MessageBox.Show(faultMessage);
+            }
+        }
+        public override void Write(string message) { }
+
+        public override void WriteLine(string message) { }
+    }
+
     public partial class Form1 : Form
     {
         private readonly TheArtOfDev.HtmlRenderer.WinForms.HtmlPanel _htmlPanel;
@@ -16,12 +53,12 @@ namespace WindowsFormsApp1
 
         private DocListInfo _docListInfo = null;
 
-        public Form1()
-        {
+        public Form1() {
             InitializeComponent();
 
             var binding = new BasicHttpBinding();
             var endpoint = new EndpointAddress("http://192.168.0.14:81/docs/api");
+
             _client = new TechexpertClient(binding, endpoint);
 
             _htmlPanel = new TheArtOfDev.HtmlRenderer.WinForms.HtmlPanel();
@@ -81,7 +118,8 @@ namespace WindowsFormsApp1
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.InnerException?.Message ?? ex.Message);
+                Application.Exit();
+                //MessageBox.Show(ex.InnerException?.Message ?? ex.Message);
             }
         }
 
@@ -144,14 +182,16 @@ namespace WindowsFormsApp1
             }
         }
 
+
+
         private async Task<(DocListItem[], int?)> LoadDataAsync(int part = 0)
         {
             var docListInfo = await GetDocListInfoAsync(txtSearch.Text);
-            var items = await _client.GetSearchListNAsync(docListInfo.Id, null, part, null, null, false);
+
+            var items = await _client.GetSearchListNAsync(docListInfo.Id, null, part, null, null, true);
             var nextPart = docListInfo.Parts > part + 1 ? (int?)(part + 1) : null;
             return (items.ArrayOfDocListItem, nextPart);
         }
-
         private string FormatedTitle(string text, int nd)
         {
             return Regex.Replace(text, @"^(.*?\(часть.*?\)|^[^(]*)(.*)", $"<a href=\"kodeks\" nd=\"{nd}\"><b>${{1}}</b></a>${{2}}");
@@ -173,5 +213,23 @@ namespace WindowsFormsApp1
             }
             return _docListInfo;
         }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+        }
+
+        public void Form1_UIThreadException(object sender, ThreadExceptionEventArgs e)
+        {
+            // Здесь вы можете вывести исключение в лог или на экран.
+            MessageBox.Show(e.Exception.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        public void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            // Обработайте необработанное исключение.
+            Exception ex = (Exception)e.ExceptionObject;
+            MessageBox.Show(ex.Message, "Критическая ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
     }
 }
